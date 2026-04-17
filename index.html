@@ -42,6 +42,7 @@
       display: grid;
       place-items: center;
       padding: clamp(14px, 2.6vw, 28px);
+      overscroll-behavior: none;
     }
 
     .app {
@@ -134,6 +135,7 @@
       width: 100%;
       height: min(70vh, 680px);
       display: block;
+      touch-action: none;
       background:
         linear-gradient(var(--line) 1px, transparent 1px),
         linear-gradient(90deg, var(--line) 1px, transparent 1px),
@@ -214,9 +216,51 @@
       white-space: nowrap;
     }
 
+    .mobile-pad {
+      display: none;
+      justify-content: center;
+      margin-top: 2px;
+    }
+
+    .pad-grid {
+      display: grid;
+      grid-template-columns: repeat(3, 62px);
+      grid-template-rows: repeat(3, 62px);
+      gap: 8px;
+      touch-action: none;
+    }
+
+    .pad-btn {
+      border: 0;
+      border-radius: 18px;
+      font-size: 1.3rem;
+      font-weight: 600;
+      cursor: pointer;
+      color: #1d3552;
+      background: rgba(255, 255, 255, 0.92);
+      border: 1px solid rgba(16, 34, 56, 0.08);
+      box-shadow:
+        0 7px 16px rgba(14, 33, 56, 0.1),
+        inset 0 1px 0 rgba(255, 255, 255, 0.86);
+      -webkit-tap-highlight-color: transparent;
+      transition: transform 110ms ease, filter 110ms ease;
+      user-select: none;
+    }
+
+    .pad-btn:active,
+    .pad-btn.active {
+      transform: translateY(1px) scale(0.98);
+      filter: brightness(0.97);
+    }
+
+    .pad-btn.blank {
+      visibility: hidden;
+      pointer-events: none;
+    }
+
     @media (max-width: 860px) {
       canvas {
-        height: min(62vh, 540px);
+        height: min(56vh, 520px);
       }
 
       .controls {
@@ -226,6 +270,10 @@
       .hint {
         text-align: center;
         white-space: normal;
+      }
+
+      .mobile-pad {
+        display: flex;
       }
     }
 
@@ -239,7 +287,7 @@
       }
 
       canvas {
-        height: min(56vh, 460px);
+        height: min(50vh, 430px);
       }
 
       .btn {
@@ -249,6 +297,12 @@
 
       .buttons {
         width: 100%;
+      }
+
+      .pad-grid {
+        grid-template-columns: repeat(3, 58px);
+        grid-template-rows: repeat(3, 58px);
+        gap: 7px;
       }
     }
   </style>
@@ -283,6 +337,20 @@
       </div>
       <div class="hint">Controls: Arrow Keys or Swipe | Enter to Start/Pause | R to Restart</div>
     </section>
+
+    <section class="mobile-pad" aria-label="Touch controls">
+      <div class="pad-grid">
+        <button class="pad-btn blank" tabindex="-1" aria-hidden="true"></button>
+        <button class="pad-btn" data-pad-dir="up" aria-label="Move up">▲</button>
+        <button class="pad-btn blank" tabindex="-1" aria-hidden="true"></button>
+        <button class="pad-btn" data-pad-dir="left" aria-label="Move left">◀</button>
+        <button class="pad-btn" id="padPause" aria-label="Start or pause">●</button>
+        <button class="pad-btn" data-pad-dir="right" aria-label="Move right">▶</button>
+        <button class="pad-btn blank" tabindex="-1" aria-hidden="true"></button>
+        <button class="pad-btn" data-pad-dir="down" aria-label="Move down">▼</button>
+        <button class="pad-btn blank" tabindex="-1" aria-hidden="true"></button>
+      </div>
+    </section>
   </main>
 
   <script>
@@ -298,6 +366,8 @@
       const startBtn = document.getElementById("startBtn");
       const restartBtn = document.getElementById("restartBtn");
       const speedBtn = document.getElementById("speedBtn");
+      const padPause = document.getElementById("padPause");
+      const padDirButtons = Array.from(document.querySelectorAll("[data-pad-dir]"));
 
       const STORAGE_KEY = "snake_glass_best_score";
       const GRID_SIZE = 32;
@@ -334,8 +404,9 @@
       let tickMs = SPEED_MODES[speedIndex].base;
       let timer = null;
 
-      let touchStartX = 0;
-      let touchStartY = 0;
+      let gestureActive = false;
+      let gestureX = 0;
+      let gestureY = 0;
 
       function setStatus(text, danger = false) {
         status.textContent = text;
@@ -452,8 +523,8 @@
         }
       }
 
-      function canTurn(nx, ny) {
-        return !(direction.x === -nx && direction.y === -ny);
+      function canTurn(nx, ny, refDir) {
+        return !(refDir.x === -nx && refDir.y === -ny);
       }
 
       function setDirectionByName(name) {
@@ -467,7 +538,8 @@
         if (!next) {
           return;
         }
-        if (canTurn(next.x, next.y)) {
+        const refDir = running ? queuedDirection : direction;
+        if (canTurn(next.x, next.y, refDir)) {
           queuedDirection = next;
           if (!running) {
             beginGame();
@@ -496,17 +568,29 @@
         }
       }
 
-      function onTouchStart(event) {
-        const t = event.changedTouches[0];
-        touchStartX = t.clientX;
-        touchStartY = t.clientY;
+      function triggerTurnVisual(button) {
+        button.classList.add("active");
+        setTimeout(() => button.classList.remove("active"), 110);
       }
 
-      function onTouchEnd(event) {
-        const t = event.changedTouches[0];
-        const dx = t.clientX - touchStartX;
-        const dy = t.clientY - touchStartY;
-        const threshold = 24;
+      function startGesture(x, y) {
+        gestureActive = true;
+        gestureX = x;
+        gestureY = y;
+      }
+
+      function endGesture() {
+        gestureActive = false;
+      }
+
+      function updateGesture(x, y) {
+        if (!gestureActive) {
+          return;
+        }
+
+        const dx = x - gestureX;
+        const dy = y - gestureY;
+        const threshold = Math.max(10, Math.min(canvas.clientWidth, canvas.clientHeight) * 0.035);
 
         if (Math.abs(dx) < threshold && Math.abs(dy) < threshold) {
           return;
@@ -517,6 +601,9 @@
         } else {
           setDirectionByName(dy > 0 ? "down" : "up");
         }
+
+        gestureX = x;
+        gestureY = y;
       }
 
       function roundedRect(x, y, w, h, r) {
@@ -645,8 +732,24 @@
       }
 
       window.addEventListener("keydown", handleKey, { passive: false });
-      canvas.addEventListener("touchstart", onTouchStart, { passive: true });
-      canvas.addEventListener("touchend", onTouchEnd, { passive: true });
+      canvas.addEventListener("touchmove", (event) => event.preventDefault(), { passive: false });
+      canvas.addEventListener("pointerdown", (event) => {
+        if (event.pointerType === "mouse") {
+          return;
+        }
+        event.preventDefault();
+        canvas.setPointerCapture(event.pointerId);
+        startGesture(event.clientX, event.clientY);
+      });
+      canvas.addEventListener("pointermove", (event) => {
+        if (!gestureActive || event.pointerType === "mouse") {
+          return;
+        }
+        event.preventDefault();
+        updateGesture(event.clientX, event.clientY);
+      });
+      canvas.addEventListener("pointerup", endGesture);
+      canvas.addEventListener("pointercancel", endGesture);
 
       startBtn.addEventListener("click", () => {
         startBtn.classList.add("active");
@@ -664,6 +767,24 @@
         speedBtn.classList.add("active");
         setTimeout(() => speedBtn.classList.remove("active"), 120);
         setSpeed();
+      });
+
+      padDirButtons.forEach((button) => {
+        const dir = button.dataset.padDir;
+        button.addEventListener("pointerdown", (event) => {
+          event.preventDefault();
+          setDirectionByName(dir);
+          triggerTurnVisual(button);
+          if (navigator.vibrate) {
+            navigator.vibrate(8);
+          }
+        });
+      });
+
+      padPause.addEventListener("pointerdown", (event) => {
+        event.preventDefault();
+        triggerTurnVisual(padPause);
+        togglePause();
       });
 
       updateSpeedButton();
